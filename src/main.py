@@ -10,15 +10,16 @@ import sys
 import random
 import numpy as np
 import torch
-from torch.utils.data import DataLoader
+from torch import Generator
+from torch.utils.data import DataLoader, ConcatDataset, random_split
 
-sys.path.append("../detr")
-from engine import evaluate, train_one_epoch
-from models import build_model
-import util.misc as utils
-import datasets.transforms as R
+from detr.engine import evaluate, train_one_epoch
+from detr.models import build_model
+import detr.util.misc as utils
+import detr.datasets.transforms as R
 
 import table_datasets as TD
+from labelme_dataset import CVATLabelMeTableStructure
 from table_datasets import PDFTablesDataset
 from eval import eval_coco
 
@@ -48,7 +49,7 @@ def get_args():
                         default='')
     parser.add_argument('--debug_save_dir',
                         help='Filepath to save visualizations',
-                        default='debug')                        
+                        default='debug')
     parser.add_argument('--table_words_dir',
                         help="Folder containg the bboxes of table words")
     parser.add_argument('--mode',
@@ -74,7 +75,7 @@ def get_args():
 
 
 def get_transform(data_type, image_set):
-    if data_type == 'structure':
+    if data_type == 'structure' or 'labelme_structure':
         return TD.get_structure_transform(image_set)
     else:
         return TD.get_detection_transform(image_set)
@@ -89,6 +90,16 @@ def get_class_map(data_type):
             'table column header': 3,
             'table projected row header': 4,
             'table spanning cell': 5,
+            'no object': 6
+        }
+    elif data_type == "labelme_structure":
+        class_map = {
+            'table': 0,
+            'column': 1,
+            'row': 2,
+            'column_header': 3,
+            'projected_row_header': 4,
+            'spanning_cell': 5,
             'no object': 6
         }
     else:
@@ -106,26 +117,50 @@ def get_data(args):
     class_map = get_class_map(args.data_type)
 
     if args.mode == "train":
-        dataset_train = PDFTablesDataset(
-            os.path.join(args.data_root_dir, "train"),
-            get_transform(args.data_type, "train"),
-            do_crop=False,
-            max_size=args.train_max_size,
-            include_eval=False,
-            max_neg=0,
-            make_coco=False,
-            image_extension=".jpg",
-            xml_fileset="train_filelist.txt",
-            class_map=class_map)
-        dataset_val = PDFTablesDataset(os.path.join(args.data_root_dir, "val"),
-                                       get_transform(args.data_type, "val"),
-                                       do_crop=False,
-                                       max_size=args.val_max_size,
-                                       include_eval=False,
-                                       make_coco=True,
-                                       image_extension=".jpg",
-                                       xml_fileset="val_filelist.txt",
-                                       class_map=class_map)
+        if args.data_type == "labelme_structure":
+            if not isinstance(args.data_root_dir, list):
+                args.data_root_dir = [args.data_root_dir]
+            dataset = ConcatDataset([
+                CVATLabelMeTableStructure(
+                    os.path.join(root),
+                    get_transform(args.data_type, "train"),
+                    do_crop=False,
+                    max_size=args.train_max_size,
+                    include_eval=False,
+                    max_neg=0,
+                    make_coco=False,
+                    image_extension=".png",
+                    xml_fileset="train_filelist.txt",
+                    class_map=class_map
+                )
+            ] for root in args.data_root_dir)
+            total = len(dataset)
+            train_size = int(total * 0.7 + 0.5)
+            val_size = total - train_size
+            dataset_train, dataset_val = random_split(
+                dataset, [train_size, val_size], generator=Generator().manual_seed(42)
+            )
+        else:
+            dataset_train = PDFTablesDataset(
+                os.path.join(args.data_root_dir, "train"),
+                get_transform(args.data_type, "train"),
+                do_crop=False,
+                max_size=args.train_max_size,
+                include_eval=False,
+                max_neg=0,
+                make_coco=False,
+                image_extension=".jpg",
+                xml_fileset="train_filelist.txt",
+                class_map=class_map)
+            dataset_val = PDFTablesDataset(os.path.join(args.data_root_dir, "val"),
+                                           get_transform(args.data_type, "val"),
+                                           do_crop=False,
+                                           max_size=args.val_max_size,
+                                           include_eval=False,
+                                           make_coco=True,
+                                           image_extension=".jpg",
+                                           xml_fileset="val_filelist.txt",
+                                           class_map=class_map)
 
         sampler_train = torch.utils.data.RandomSampler(dataset_train)
         sampler_val = torch.utils.data.SequentialSampler(dataset_val)
@@ -228,7 +263,7 @@ def train(args, model, criterion, postprocessors, device):
                 if "backbone" in n and p.requires_grad
             ],
             "lr":
-            args.lr_backbone,
+                args.lr_backbone,
         },
     ]
     optimizer = torch.optim.AdamW(param_dicts,
@@ -260,8 +295,9 @@ def train(args, model, criterion, postprocessors, device):
         else:
             print("*** ERROR: Optimizer state of saved checkpoint not found. "
                   "To resume training with new initialized values add the --load_weights_only flag.")
-            raise Exception("ERROR: Optimizer state of saved checkpoint not found. Must add --load_weights_only flag to resume training without.")          
-        
+            raise Exception(
+                "ERROR: Optimizer state of saved checkpoint not found. Must add --load_weights_only flag to resume training without.")
+
         if not args.load_weights_only and 'epoch' in checkpoint:
             args.start_epoch = checkpoint['epoch'] + 1
         elif args.load_weights_only:
@@ -287,7 +323,8 @@ def train(args, model, criterion, postprocessors, device):
     model_save_path = os.path.join(output_directory, 'model.pth')
     print("Output model path: ", model_save_path)
     if not resume_checkpoint and os.path.exists(model_save_path):
-        print("*** WARNING: Output model path exists but is not being used to resume training; training will overwrite it.")
+        print(
+            "*** WARNING: Output model path exists but is not being used to resume training; training will overwrite it.")
 
     if args.start_epoch >= args.epochs:
         print("*** WARNING: Starting epoch ({}) is greater or equal to the number of training epochs ({}).".format(
@@ -331,8 +368,8 @@ def train(args, model, criterion, postprocessors, device):
                     }, model_save_path)
 
         # Save checkpoint for evaluation
-        if (epoch+1) % args.checkpoint_freq == 0:
-            model_save_path_epoch = os.path.join(output_directory, 'model_' + str(epoch+1) + '.pth')
+        if (epoch + 1) % args.checkpoint_freq == 0:
+            model_save_path_epoch = os.path.join(output_directory, 'model_' + str(epoch + 1) + '.pth')
             torch.save(model.state_dict(), model_save_path_epoch)
 
     print('Total training time: ', datetime.now() - start_time)
@@ -344,14 +381,15 @@ def main():
     for key, value in cmd_args.items():
         if not key in config_args or not value is None:
             config_args[key] = value
-    #config_args.update(cmd_args)
+    # config_args.update(cmd_args)
     args = type('Args', (object,), config_args)
     print(args.__dict__)
     print('-' * 100)
 
     # Check for debug mode
     if args.mode == 'eval' and args.debug:
-        print("Running evaluation/inference in DEBUG mode, processing will take longer. Saving output to: {}.".format(args.debug_save_dir))
+        print("Running evaluation/inference in DEBUG mode, processing will take longer. Saving output to: {}.".format(
+            args.debug_save_dir))
         os.makedirs(args.debug_save_dir, exist_ok=True)
 
     # fix the seed for reproducibility
