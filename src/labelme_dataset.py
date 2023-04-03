@@ -197,10 +197,10 @@ class CVATLabelMeTableStructure(Dataset):
 
                 # Reduce class set
                 keep_indices = [idx for idx, label in enumerate(labels) if label in self.class_set]
-                bboxes = [bboxes[idx] for idx in keep_indices]
+                boxes = [boxes[idx] for idx in keep_indices]
                 labels = [labels[idx] for idx in keep_indices]
 
-                for bbox, label in zip(bboxes, labels):
+                for bbox, label in zip(boxes, labels):
                     ann = {'area': (bbox[2] - bbox[0]) * (bbox[3] - bbox[1]),
                            'iscrowd': 0,
                            'bbox': [bbox[0], bbox[1], bbox[2] - bbox[0], bbox[3] - bbox[1]],
