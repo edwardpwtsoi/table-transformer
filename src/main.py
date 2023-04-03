@@ -135,7 +135,7 @@ def get_data(args):
                     xml_fileset="train_filelist.txt",
                     class_map=class_map
                 )
-            ] for root in args.data_root_dir)
+            for root in args.data_root_dir])
             total = len(dataset)
             train_size = int(total * 0.7 + 0.5)
             val_size = total - train_size
