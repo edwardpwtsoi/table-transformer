@@ -369,7 +369,7 @@ def train(args, model, criterion, postprocessors, device):
                 secondary_indices_mapping[dataset_idx].append(sample_idx)
             for dataset_idx, samples_indices in secondary_indices_mapping.items():
                 sub_ds = dataset_val.dataset.datasets[dataset_idx]
-                sampler = SubsetRandomSampler(sub_ds, samples_indices)
+                sampler = SubsetRandomSampler(samples_indices)
                 sub_ds_loader_val = DataLoader(
                     sub_ds,
                     2 * args.batch_size,
