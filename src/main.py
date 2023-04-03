@@ -30,6 +30,7 @@ def get_args():
 
     parser.add_argument('--data_root_dir',
                         required=True,
+                        nargs="+",
                         help="Root data directory for images and labels")
     parser.add_argument('--config_file',
                         required=True,
