@@ -1,9 +1,11 @@
 """
 Copyright (C) 2021 Microsoft Corporation
 """
+import bisect
 import os
 import argparse
 import json
+from collections import defaultdict
 from datetime import datetime
 import string
 import sys
@@ -11,7 +13,7 @@ import random
 import numpy as np
 import torch
 from torch import Generator
-from torch.utils.data import DataLoader, ConcatDataset, random_split
+from torch.utils.data import DataLoader, ConcatDataset, random_split, Subset, SubsetRandomSampler
 
 sys.path.append("../detr")
 from engine import evaluate, train_one_epoch
@@ -353,10 +355,45 @@ def train(args, model, criterion, postprocessors, device):
 
         lr_scheduler.step()
 
-        pubmed_stats, coco_evaluator = evaluate(model, criterion,
-                                                postprocessors,
-                                                data_loader_val, dataset_val,
-                                                device, None)
+        if isinstance(dataset_val, Subset) and isinstance(dataset_val.dataset, ConcatDataset):
+            pubmed_stats_list = []
+            primary_indices = dataset_val.indices
+            secondary_dataset_indices = [
+                bisect.bisect_right(dataset_val.dataset.cumulative_sizes, idx) for idx in primary_indices
+            ]
+            secondary_indices_mapping = defaultdict(list)
+            for dataset_idx, idx in zip(secondary_dataset_indices, primary_indices):
+                sample_idx = idx if dataset_idx == 0 else idx - dataset_val.dataset.cumulative_sizes[dataset_idx - 1]
+                secondary_indices_mapping[dataset_idx].append(sample_idx)
+            for dataset_idx, samples_indices in secondary_indices_mapping.items():
+                sub_ds = dataset_val.dataset.datasets[dataset_idx]
+                sampler = SubsetRandomSampler(sub_ds, samples_indices)
+                sub_ds_loader_val = DataLoader(
+                    sub_ds,
+                    2 * args.batch_size,
+                    sampler=sampler,
+                    drop_last=False,
+                    collate_fn=utils.collate_fn,
+                    num_workers=args.num_workers
+                )
+                sub_pubmed_stats, _ = evaluate(
+                    model, criterion,
+                    postprocessors,
+                    sub_ds_loader_val, sub_ds,
+                    device, None
+                )
+                pubmed_stats_list.append(sub_pubmed_stats)
+            pubmed_stats = {
+                "coco_eval_bbox": [
+                    sum([ps['coco_eval_bbox'][i] for ps in pubmed_stats_list]) / len(pubmed_stats_list)
+                for i in range(pubmed_stats_list[0]['coco_eval_bbox'])]
+            }
+
+        else:
+            pubmed_stats, coco_evaluator = evaluate(model, criterion,
+                                                    postprocessors,
+                                                    data_loader_val, dataset_val,
+                                                    device, None)
         print("pubmed: AP50: {:.3f}, AP75: {:.3f}, AP: {:.3f}, AR: {:.3f}".
               format(pubmed_stats['coco_eval_bbox'][1],
                      pubmed_stats['coco_eval_bbox'][2],

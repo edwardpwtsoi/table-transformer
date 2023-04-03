@@ -1,6 +1,7 @@
 """
 Copyright (C) 2021 Microsoft Corporation
 """
+import itertools
 import logging
 import xml.etree.ElementTree as ET
 from collections import defaultdict, Counter
@@ -174,6 +175,121 @@ class CVATLabelMeTableStructure(Dataset):
         assert all([isinstance(x, dict) for x in annotations])
         self.annotations: List[Dict] = annotations
 
+        if self.make_coco:
+            self.dataset = {}
+            self.dataset['images'] = [{'id': idx} for idx, _ in enumerate(self.annotations)]
+            self.dataset['annotations'] = []
+            ann_id = 0
+            for image_id, ann in enumerate(self.annotations):
+                img_path = self.root.joinpath(self.image_dir, ann["image_name"])
+                roi = add_margin(ann["table"], self.margin)
+                original = Image.open(img_path).convert("RGB").crop(roi.astype(int))
+                orig_w, orig_h = original.size
+                w, h = orig_w, orig_h
+                # load boxes and labels
+                boxes = np.concatenate([ann["table"][None, :], ann["table_structures"]], 0)
+                offsets = np.tile(roi[:2], 2)
+                assert offsets.ndim == 1
+                boxes -= offsets[None, :]
+                boxes[:, ::2] = boxes[:, ::2].clip(0, orig_w)
+                boxes[:, 1::2] = boxes[:, 1::2].clip(0, orig_h)
+                labels = np.asarray([0] + [self.class_map[label] for label in ann["labels"]], dtype=np.int64)
+
+                # Reduce class set
+                keep_indices = [idx for idx, label in enumerate(labels) if label in self.class_set]
+                bboxes = [bboxes[idx] for idx in keep_indices]
+                labels = [labels[idx] for idx in keep_indices]
+
+                for bbox, label in zip(bboxes, labels):
+                    ann = {'area': (bbox[2] - bbox[0]) * (bbox[3] - bbox[1]),
+                           'iscrowd': 0,
+                           'bbox': [bbox[0], bbox[1], bbox[2] - bbox[0], bbox[3] - bbox[1]],
+                           'category_id': label,
+                           'image_id': image_id,
+                           'id': ann_id,
+                           'ignore': 0,
+                           'segmentation': []}
+                    self.dataset['annotations'].append(ann)
+                    ann_id += 1
+            self.dataset['categories'] = [{'id': idx} for idx in self.class_list[:-1]]
+
+            self.createIndex()
+
+    def createIndex(self):
+        # create index
+        print('creating index...')
+        anns, cats, imgs = {}, {}, {}
+        imgToAnns,catToImgs = defaultdict(list),defaultdict(list)
+        if 'annotations' in self.dataset:
+            for ann in self.dataset['annotations']:
+                imgToAnns[ann['image_id']].append(ann)
+                anns[ann['id']] = ann
+
+        if 'images' in self.dataset:
+            for img in self.dataset['images']:
+                imgs[img['id']] = img
+
+        if 'categories' in self.dataset:
+            for cat in self.dataset['categories']:
+                cats[cat['id']] = cat
+
+        if 'annotations' in self.dataset and 'categories' in self.dataset:
+            for ann in self.dataset['annotations']:
+                catToImgs[ann['category_id']].append(ann['image_id'])
+
+        print('index created!')
+
+        # create class members
+        self.anns = anns
+        self.imgToAnns = imgToAnns
+        self.catToImgs = catToImgs
+        self.imgs = imgs
+        self.cats = cats
+
+    def getImgIds(self):
+        return range(len(self.page_ids))
+
+    def getCatIds(self):
+        return range(10)
+
+    def loadAnns(self, ids=[]):
+        """
+        Load anns with the specified ids.
+        :param ids (int array)       : integer ids specifying anns
+        :return: anns (object array) : loaded ann objects
+        """
+        if _isArrayLike(ids):
+            return [self.anns[id] for id in ids]
+        elif type(ids) == int:
+            return [self.anns[ids]]
+
+    def getAnnIds(self, imgIds=[], catIds=[], areaRng=[]):
+        """
+        Get ann ids that satisfy given filter conditions. default skips that filter
+        :param imgIds  (int array)     : get anns for given imgs
+               catIds  (int array)     : get anns for given cats
+               areaRng (float array)   : get anns for given area range (e.g. [0 inf])
+               iscrowd (boolean)       : get anns for given crowd label (False or True)
+        :return: ids (int array)       : integer array of ann ids
+        """
+        imgIds = imgIds if _isArrayLike(imgIds) else [imgIds]
+        catIds = catIds if _isArrayLike(catIds) else [catIds]
+
+        if len(imgIds) == len(catIds) == len(areaRng) == 0:
+            anns = self.dataset['annotations']
+        else:
+            if not len(imgIds) == 0:
+                lists = [self.imgToAnns[imgId] for imgId in imgIds if imgId in self.imgToAnns]
+                anns = list(itertools.chain.from_iterable(lists))
+            else:
+                anns = self.dataset['annotations']
+            anns = anns if len(catIds) == 0 else [ann for ann in anns if ann['category_id'] in catIds]
+            anns = anns if len(areaRng) == 0 else [ann for ann in anns if
+                                                   ann['area'] > areaRng[0] and ann['area'] < areaRng[1]]
+
+            ids = [ann['id'] for ann in anns]
+        return ids
+
     def __len__(self):
         return len(self.annotations)
 
@@ -212,3 +328,7 @@ class CVATLabelMeTableStructure(Dataset):
     @staticmethod
     def where_rb_greater_than_lt(boxes):
         return (boxes[:, 3] > boxes[:, 1]) & (boxes[:, 2] > boxes[:, 0])
+
+
+def _isArrayLike(obj):
+    return hasattr(obj, '__iter__') and hasattr(obj, '__len__')
