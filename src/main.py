@@ -134,7 +134,7 @@ def get_data(args):
                     max_size=args.train_max_size,
                     include_eval=False,
                     max_neg=0,
-                    make_coco=False,
+                    make_coco=True,
                     image_extension=".png",
                     xml_fileset="train_filelist.txt",
                     class_map=class_map
