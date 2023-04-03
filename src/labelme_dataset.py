@@ -247,7 +247,7 @@ class CVATLabelMeTableStructure(Dataset):
         self.cats = cats
 
     def getImgIds(self):
-        return range(len(self.page_ids))
+        return range(len(self.annotations))
 
     def getCatIds(self):
         return range(10)
