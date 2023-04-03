@@ -40,7 +40,7 @@ def get_args():
                         help="Backbone for the model")
     parser.add_argument(
         '--data_type',
-        choices=['detection', 'structure'],
+        choices=['detection', 'structure', "labelme_structure"],
         default='structure',
         help="toggle between structure recognition and table detection")
     parser.add_argument('--model_load_path', help="The path to trained model")
