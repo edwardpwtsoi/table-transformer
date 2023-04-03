@@ -388,7 +388,7 @@ def train(args, model, criterion, postprocessors, device):
             pubmed_stats = {
                 "coco_eval_bbox": [
                     sum([ps['coco_eval_bbox'][i] for ps in pubmed_stats_list]) / len(pubmed_stats_list)
-                for i in range(pubmed_stats_list[0]['coco_eval_bbox'])]
+                for i in range(len(pubmed_stats_list[0]['coco_eval_bbox']))]
             }
 
         else:
