@@ -197,8 +197,8 @@ class CVATLabelMeTableStructure(Dataset):
         num_objs = boxes.shape[0]
         # Create target
         target = {}
-        target["boxes"] = boxes
-        target["labels"] = labels
+        target["boxes"] = torch.as_tensor(boxes, dtype=torch.float32)
+        target["labels"] =  torch.as_tensor(labels,  dtype=torch.int64)
         target["image_id"] = torch.as_tensor([idx])
         target["area"] = boxes[:, 2] * boxes[:, 3]  # COCO area
         target["iscrowd"] = torch.zeros((num_objs,), dtype=torch.int64)
