@@ -321,7 +321,7 @@ def train(args, model, criterion, postprocessors, device):
     # Create new save directory
     else:
         run_date = datetime.now().strftime("%Y%m%d%H%M%S")
-        output_directory = Path(os.getcwd()).parent.parent.joinpath("output", run_date)
+        output_directory = Path(os.getcwd()).parent.joinpath("output", run_date)
 
     if not os.path.exists(output_directory):
         os.makedirs(output_directory)
