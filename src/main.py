@@ -13,10 +13,11 @@ import torch
 from torch import Generator
 from torch.utils.data import DataLoader, ConcatDataset, random_split
 
-from detr.engine import evaluate, train_one_epoch
-from detr.models import build_model
-import detr.util.misc as utils
-import detr.datasets.transforms as R
+sys.path.append("../detr")
+from engine import evaluate, train_one_epoch
+from models import build_model
+import util.misc as utils
+import datasets.transforms as R
 
 import table_datasets as TD
 from labelme_dataset import CVATLabelMeTableStructure
