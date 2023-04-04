@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 import torch
 from torch import Generator
-from torch.utils.data import DataLoader, ConcatDataset, random_split, Subset, SubsetRandomSampler
+from torch.utils.data import DataLoader, ConcatDataset, random_split, Subset, SubsetRandomSampler, DistributedSampler
 
 sys.path.append("../detr")
 from engine import evaluate, train_one_epoch
@@ -76,6 +76,11 @@ def get_args():
     parser.add_argument('--test_max_size', type=int)
     parser.add_argument('--eval_pool_size', type=int, default=1)
     parser.add_argument('--eval_step', type=int, default=1)
+
+    # distributed training parameters
+    parser.add_argument('--world_size', default=1, type=int,
+                        help='number of distributed processes')
+    parser.add_argument('--dist_url', default='env://', help='url used to set up distributed training')
 
     return parser.parse_args()
 
@@ -168,8 +173,12 @@ def get_data(args):
                                            xml_fileset="val_filelist.txt",
                                            class_map=class_map)
 
-        sampler_train = torch.utils.data.RandomSampler(dataset_train)
-        sampler_val = torch.utils.data.SequentialSampler(dataset_val)
+        if args.distributed:
+            sampler_train = DistributedSampler(dataset_train)
+            sampler_val = DistributedSampler(dataset_val, shuffle=False)
+        else:
+            sampler_train = torch.utils.data.RandomSampler(dataset_train)
+            sampler_val = torch.utils.data.SequentialSampler(dataset_val)
 
         batch_sampler_train = torch.utils.data.BatchSampler(sampler_train,
                                                             args.batch_size,
@@ -256,6 +265,13 @@ def train(args, model, criterion, postprocessors, device):
     print("finished loading data in :", datetime.now() - dataloading_time)
 
     model_without_ddp = model
+
+    if args.distributed:
+        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
+        model_without_ddp = model.module
+    n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print('number of params:', n_parameters)
+
     param_dicts = [
         {
             "params": [
@@ -426,6 +442,7 @@ def main():
     args = type('Args', (object,), config_args)
     print(args.__dict__)
     print('-' * 100)
+    utils.init_distributed_mode(args)
 
     # Check for debug mode
     if args.mode == 'eval' and args.debug:
